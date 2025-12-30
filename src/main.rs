@@ -15,6 +15,16 @@ fn main() {
         eprintln!("Error in Tick Bar: {}", e);
     }
 
+    println!("\n--- Volume Bar ---");
+    if let Err(e) = ch2::draw_volume_bar() {
+        eprintln!("Error in Volume Bar: {}", e);
+    }
+
+    println!("\n--- Dollar Bar ---");
+    if let Err(e) = ch2::draw_dollar_bar() {
+        eprintln!("Error in Dollar Bar: {}", e);
+    }
+
     println!("\n--- Compare Distribution ---");
     if let Err(e) = ch2::run_compare_distribution() {
         eprintln!("Error in Compare Distribution: {}", e);
