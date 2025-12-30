@@ -1,0 +1,1 @@
+pub const TARDIS_CSV_PATH: &str = "data/2024-06-26_BTCUSDT_trades.csv";
