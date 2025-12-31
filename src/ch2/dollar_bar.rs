@@ -80,7 +80,7 @@ pub fn draw_dollar_bar() -> Result<(), Box<dyn Error>> {
     let trades = read_trades(file_path)?;
     println!("Read {} trades.", trades.len());
 
-    let interval_dollar = 10_000_000.0; // Example dollar threshold (10M USDT)
+    let interval_dollar = 100_000_000.0; // Example dollar threshold (100M USDT)
     println!("Computing {} dollar value as a bar...", interval_dollar);
     let bars = compute_dollar_bars(&trades, interval_dollar);
     println!("Generated {} bars.", bars.len());

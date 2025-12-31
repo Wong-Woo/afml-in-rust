@@ -78,7 +78,7 @@ pub fn draw_volume_bar() -> Result<(), Box<dyn Error>> {
     let trades = read_trades(file_path)?;
     println!("Read {} trades.", trades.len());
 
-    let interval_volume = 100.0; // Example volume threshold
+    let interval_volume = 1000.0; // Example volume threshold
     println!("Computing {} volume as a bar...", interval_volume);
     let bars = compute_volume_bars(&trades, interval_volume);
     println!("Generated {} bars.", bars.len());
