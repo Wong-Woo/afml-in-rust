@@ -14,18 +14,28 @@ struct Stats {
 
 fn compute_stats(data: &[f64]) -> Stats {
     let n = data.len() as f64;
-    if n <= 2.0 { return Stats { skewness: 0.0, kurtosis: 0.0 }; }
+    if n < 4.0 { return Stats { skewness: 0.0, kurtosis: 0.0 }; }
     
     let mean = data.iter().sum::<f64>() / n;
     let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
     let std_dev = variance.sqrt();
+
+    if std_dev == 0.0 {
+        return Stats { skewness: 0.0, kurtosis: 0.0 };
+    }
     
-    let skewness = data.iter().map(|x| ((x - mean) / std_dev).powi(3)).sum::<f64>() / n;
-    let kurtosis = data.iter().map(|x| ((x - mean) / std_dev).powi(4)).sum::<f64>() / n;
+    // Unbiased Estimator for Skewness
+    let sum_pow3 = data.iter().map(|x| ((x - mean) / std_dev).powi(3)).sum::<f64>();
+    let skewness = (n / ((n - 1.0) * (n - 2.0))) * sum_pow3;
+
+    // Unbiased Estimator for Excess Kurtosis
+    let sum_pow4 = data.iter().map(|x| ((x - mean) / std_dev).powi(4)).sum::<f64>();
+    let kurtosis = (n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0))) * sum_pow4
+                 - (3.0 * (n - 1.0).powi(2) / ((n - 2.0) * (n - 3.0)));
     
     Stats {
         skewness,
-        kurtosis: kurtosis - 3.0, // Excess Kurtosis
+        kurtosis,
     }
 }
 
