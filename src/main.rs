@@ -45,6 +45,24 @@ fn main() {
                 eprintln!("Error in Tick Imbalance Bar: {}", e);
             }
         }
+        "volume_imbalance" => {
+            println!("\n--- Volume Imbalance Bar ---");
+            if let Err(e) = ch2::draw_volume_imbalance_bar() {
+                eprintln!("Error in Volume Imbalance Bar: {}", e);
+            }
+        }
+        "dollar_imbalance" => {
+            println!("\n--- Dollar Imbalance Bar ---");
+            if let Err(e) = ch2::draw_dollar_imbalance_bar() {
+                eprintln!("Error in Dollar Imbalance Bar: {}", e);
+            }
+        }
+        "cusum" => {
+            println!("\n--- CUSUM Filter ---");
+            if let Err(e) = ch2::draw_cusum_filter() {
+                eprintln!("Error in CUSUM Filter: {}", e);
+            }
+        }
         "compare" => {
             println!("\n--- Compare Distribution ---");
             if let Err(e) = ch2::run_compare_distribution() {
@@ -89,6 +107,16 @@ fn run_all() {
         eprintln!("Error in Tick Imbalance Bar: {}", e);
     }
 
+    println!("\n--- Volume Imbalance Bar ---");
+    if let Err(e) = ch2::draw_volume_imbalance_bar() {
+        eprintln!("Error in Volume Imbalance Bar: {}", e);
+    }
+
+    println!("\n--- Dollar Imbalance Bar ---");
+    if let Err(e) = ch2::draw_dollar_imbalance_bar() {
+        eprintln!("Error in Dollar Imbalance Bar: {}", e);
+    }
+
     println!("\n--- Compare Distribution ---");
     if let Err(e) = ch2::run_compare_distribution() {
         eprintln!("Error in Compare Distribution: {}", e);
@@ -102,7 +130,9 @@ fn print_usage() {
     println!("  tick       - Generate Tick Bars");
     println!("  volume     - Generate Volume Bars");
     println!("  dollar     - Generate Dollar Bars");
-    println!("  imbalance  - Generate Tick Imbalance Bars");
-    println!("  compare    - Compare Distributions");
+    println!("  imbalance         - Generate Tick Imbalance Bars");
+    println!("  volume_imbalance  - Generate Volume Imbalance Bars");
+    println!("  dollar_imbalance  - Generate Dollar Imbalance Bars");
+    println!("  compare           - Compare Distributions");
     println!("  all        - Run all examples");
 }

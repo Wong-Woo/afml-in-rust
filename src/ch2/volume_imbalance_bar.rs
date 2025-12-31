@@ -1,18 +1,18 @@
 use crate::config;
-use crate::base::{Bar, read_trades, Trade, draw_chart_file};
+use crate::base::{Bar, read_trades, Trade};
 use crate::ch2::time_bar::compute_time_bars;
 use std::error::Error;
 use chrono::{Utc, TimeZone};
 use plotters::prelude::*;
 
-pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64) -> Vec<Bar> {
+pub fn compute_volume_imbalance_bars(trades: &[Trade], initial_expected_volume: f64) -> Vec<Bar> {
     if trades.is_empty() {
         return Vec::new();
     }
 
     let mut bars = Vec::new();
     let mut current_imbalance: f64 = 0.0;
-    let mut current_ticks: f64 = 0.0;
+    let mut current_volume: f64 = 0.0;
     
     let mut open = trades[0].price;
     let mut high = trades[0].price;
@@ -26,9 +26,14 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
     let mut is_new_bar = true;
 
     // EWMA parameters
-    let alpha = 0.05; // Smoothing factor (approx 20 bars)
-    let mut ewma_expected_ticks = initial_expected_ticks;
+    let alpha = 0.05; // Smoothing factor
+    let mut ewma_expected_volume = initial_expected_volume;
     let mut ewma_expected_imbalance_per_tick: f64 = 0.5; // Initial guess for |2P[b=1]-1|
+
+    // For calculating imbalance per tick (or per unit), we need to track ticks or just use the ratio
+    // In standard implementation, we track expected imbalance (theta).
+    // Threshold = E[V] * |2P[b=1] - 1|
+    // Here we update |2P[b=1] - 1| based on observed imbalance.
 
     for trade in trades {
         if is_new_bar {
@@ -37,7 +42,7 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
             low = trade.price;
             volume = 0.0;
             is_new_bar = false;
-            current_ticks = 0.0;
+            current_volume = 0.0;
         }
 
         // 1. Calculate Tick Rule
@@ -51,9 +56,10 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
         prev_tick_rule = tick_rule;
         prev_price = trade.price;
 
-        // 2. Accumulate Imbalance
-        current_imbalance += tick_rule;
-        current_ticks += 1.0;
+        // 2. Accumulate Imbalance (Volume * Tick Rule)
+        let signed_volume = tick_rule * trade.amount;
+        current_imbalance += signed_volume;
+        current_volume += trade.amount;
 
         // Update Bar stats
         high = high.max(trade.price);
@@ -62,12 +68,12 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
         volume += trade.amount;
 
         // 3. Check Threshold
-        // Threshold = E[T] * |2P[b=1] - 1|
-        let threshold = ewma_expected_ticks * ewma_expected_imbalance_per_tick.abs();
+        // Threshold = E[V] * |2P[b=1] - 1|
+        let threshold = ewma_expected_volume * ewma_expected_imbalance_per_tick.abs();
         
         if current_imbalance.abs() >= threshold {
             bars.push(Bar {
-                time: Utc.timestamp_micros(trade.timestamp as i64).unwrap(), // Use current trade time (end of bar)
+                time: Utc.timestamp_micros(trade.timestamp as i64).unwrap(),
                 open,
                 high,
                 low,
@@ -76,10 +82,18 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
             });
 
             // Update EWMA
-            ewma_expected_ticks = alpha * current_ticks + (1.0 - alpha) * ewma_expected_ticks;
+            ewma_expected_volume = alpha * current_volume + (1.0 - alpha) * ewma_expected_volume;
             
-            let current_imbalance_per_tick = current_imbalance / current_ticks;
-            ewma_expected_imbalance_per_tick = alpha * current_imbalance_per_tick + (1.0 - alpha) * ewma_expected_imbalance_per_tick;
+            // Update expected imbalance ratio. 
+            // We can approximate |2P[b=1]-1| as |current_imbalance / current_volume|
+            // Since current_imbalance = sum(b_i * v_i) and current_volume = sum(v_i)
+            let observed_imbalance_ratio = if current_volume > 0.0 {
+                current_imbalance / current_volume
+            } else {
+                0.0
+            };
+            
+            ewma_expected_imbalance_per_tick = alpha * observed_imbalance_ratio + (1.0 - alpha) * ewma_expected_imbalance_per_tick;
 
             // Reset
             current_imbalance = 0.0;
@@ -90,7 +104,7 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
     bars
 }
 
-pub fn draw_tick_imbalance_bar() -> Result<(), Box<dyn Error>> {
+pub fn draw_volume_imbalance_bar() -> Result<(), Box<dyn Error>> {
     let file_path = config::TARDIS_CSV_PATH;
     println!("Reading trades from {}...", file_path);
     let trades = read_trades(file_path)?;
@@ -102,16 +116,16 @@ pub fn draw_tick_imbalance_bar() -> Result<(), Box<dyn Error>> {
     let time_bars = compute_time_bars(&trades, time_interval_minutes);
     println!("Generated {} time bars.", time_bars.len());
 
-    // 2. Compute Tick Imbalance Bars
-    // Initial guess for expected ticks per bar
-    // Lower initial guess to generate more bars initially
-    let initial_expected_ticks = trades.len() as f64 / 1000.0; 
+    // 2. Compute Volume Imbalance Bars
+    // Initial guess: Total Volume / 300
+    let total_volume: f64 = trades.iter().map(|t| t.amount).sum();
+    let initial_expected_volume = total_volume / 300.0;
     
-    println!("Computing Tick Imbalance Bars with dynamic threshold (init T={})...", initial_expected_ticks);
-    let imbalance_bars = compute_tick_imbalance_bars(&trades, initial_expected_ticks);
-    println!("Generated {} tick imbalance bars.", imbalance_bars.len());
+    println!("Computing Volume Imbalance Bars with dynamic threshold (init V={:.2})...", initial_expected_volume);
+    let imbalance_bars = compute_volume_imbalance_bars(&trades, initial_expected_volume);
+    println!("Generated {} volume imbalance bars.", imbalance_bars.len());
 
-    let output_path = "src/ch2/result/tick_imbalance_bars.png";
+    let output_path = "src/ch2/result/volume_imbalance_bars.png";
     println!("Drawing chart to {}...", output_path);
     
     draw_overlay_chart(&time_bars, &imbalance_bars, output_path)?;
@@ -152,7 +166,7 @@ fn draw_overlay_chart(
     let max_price = time_bars.iter().map(|b| b.high).fold(f64::NEG_INFINITY, f64::max);
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Tick Imbalance Bars (Red Dots) vs 15m Time Bars (Candle)", ("sans-serif", 30).into_font())
+        .caption("Volume Imbalance Bars (Blue Dots) vs 15m Time Bars (Candle)", ("sans-serif", 30).into_font())
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(40)
@@ -176,7 +190,7 @@ fn draw_overlay_chart(
         })
     )?;
 
-    // 2. Draw Tick Imbalance Bars as Points
+    // 2. Draw Imbalance Bars as Points
     chart.draw_series(
         imbalance_bars.iter().map(|b| {
             Circle::new(
@@ -186,7 +200,7 @@ fn draw_overlay_chart(
             )
         })
     )?
-    .label("Tick Imbalance Bar")
+    .label("Volume Imbalance Bar")
     .legend(|(x, y)| Circle::new((x + 10, y), 4, BLUE.filled()));
 
     chart.configure_series_labels()

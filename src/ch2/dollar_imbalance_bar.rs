@@ -1,18 +1,18 @@
 use crate::config;
-use crate::base::{Bar, read_trades, Trade, draw_chart_file};
+use crate::base::{Bar, read_trades, Trade};
 use crate::ch2::time_bar::compute_time_bars;
 use std::error::Error;
 use chrono::{Utc, TimeZone};
 use plotters::prelude::*;
 
-pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64) -> Vec<Bar> {
+pub fn compute_dollar_imbalance_bars(trades: &[Trade], initial_expected_dollar: f64) -> Vec<Bar> {
     if trades.is_empty() {
         return Vec::new();
     }
 
     let mut bars = Vec::new();
     let mut current_imbalance: f64 = 0.0;
-    let mut current_ticks: f64 = 0.0;
+    let mut current_dollar: f64 = 0.0;
     
     let mut open = trades[0].price;
     let mut high = trades[0].price;
@@ -26,8 +26,8 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
     let mut is_new_bar = true;
 
     // EWMA parameters
-    let alpha = 0.05; // Smoothing factor (approx 20 bars)
-    let mut ewma_expected_ticks = initial_expected_ticks;
+    let alpha = 0.05; // Smoothing factor
+    let mut ewma_expected_dollar = initial_expected_dollar;
     let mut ewma_expected_imbalance_per_tick: f64 = 0.5; // Initial guess for |2P[b=1]-1|
 
     for trade in trades {
@@ -37,7 +37,7 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
             low = trade.price;
             volume = 0.0;
             is_new_bar = false;
-            current_ticks = 0.0;
+            current_dollar = 0.0;
         }
 
         // 1. Calculate Tick Rule
@@ -51,9 +51,11 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
         prev_tick_rule = tick_rule;
         prev_price = trade.price;
 
-        // 2. Accumulate Imbalance
-        current_imbalance += tick_rule;
-        current_ticks += 1.0;
+        // 2. Accumulate Imbalance (Dollar * Tick Rule)
+        let dollar_value = trade.price * trade.amount;
+        let signed_dollar = tick_rule * dollar_value;
+        current_imbalance += signed_dollar;
+        current_dollar += dollar_value;
 
         // Update Bar stats
         high = high.max(trade.price);
@@ -62,12 +64,12 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
         volume += trade.amount;
 
         // 3. Check Threshold
-        // Threshold = E[T] * |2P[b=1] - 1|
-        let threshold = ewma_expected_ticks * ewma_expected_imbalance_per_tick.abs();
+        // Threshold = E[D] * |2P[b=1] - 1|
+        let threshold = ewma_expected_dollar * ewma_expected_imbalance_per_tick.abs();
         
         if current_imbalance.abs() >= threshold {
             bars.push(Bar {
-                time: Utc.timestamp_micros(trade.timestamp as i64).unwrap(), // Use current trade time (end of bar)
+                time: Utc.timestamp_micros(trade.timestamp as i64).unwrap(),
                 open,
                 high,
                 low,
@@ -76,10 +78,16 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
             });
 
             // Update EWMA
-            ewma_expected_ticks = alpha * current_ticks + (1.0 - alpha) * ewma_expected_ticks;
+            ewma_expected_dollar = alpha * current_dollar + (1.0 - alpha) * ewma_expected_dollar;
             
-            let current_imbalance_per_tick = current_imbalance / current_ticks;
-            ewma_expected_imbalance_per_tick = alpha * current_imbalance_per_tick + (1.0 - alpha) * ewma_expected_imbalance_per_tick;
+            // Update expected imbalance ratio. 
+            let observed_imbalance_ratio = if current_dollar > 0.0 {
+                current_imbalance / current_dollar
+            } else {
+                0.0
+            };
+            
+            ewma_expected_imbalance_per_tick = alpha * observed_imbalance_ratio + (1.0 - alpha) * ewma_expected_imbalance_per_tick;
 
             // Reset
             current_imbalance = 0.0;
@@ -90,7 +98,7 @@ pub fn compute_tick_imbalance_bars(trades: &[Trade], initial_expected_ticks: f64
     bars
 }
 
-pub fn draw_tick_imbalance_bar() -> Result<(), Box<dyn Error>> {
+pub fn draw_dollar_imbalance_bar() -> Result<(), Box<dyn Error>> {
     let file_path = config::TARDIS_CSV_PATH;
     println!("Reading trades from {}...", file_path);
     let trades = read_trades(file_path)?;
@@ -102,16 +110,16 @@ pub fn draw_tick_imbalance_bar() -> Result<(), Box<dyn Error>> {
     let time_bars = compute_time_bars(&trades, time_interval_minutes);
     println!("Generated {} time bars.", time_bars.len());
 
-    // 2. Compute Tick Imbalance Bars
-    // Initial guess for expected ticks per bar
-    // Lower initial guess to generate more bars initially
-    let initial_expected_ticks = trades.len() as f64 / 1000.0; 
+    // 2. Compute Dollar Imbalance Bars
+    // Initial guess: Total Dollar / 300
+    let total_dollar: f64 = trades.iter().map(|t| t.price * t.amount).sum();
+    let initial_expected_dollar = total_dollar / 300.0;
     
-    println!("Computing Tick Imbalance Bars with dynamic threshold (init T={})...", initial_expected_ticks);
-    let imbalance_bars = compute_tick_imbalance_bars(&trades, initial_expected_ticks);
-    println!("Generated {} tick imbalance bars.", imbalance_bars.len());
+    println!("Computing Dollar Imbalance Bars with dynamic threshold (init D={:.2})...", initial_expected_dollar);
+    let imbalance_bars = compute_dollar_imbalance_bars(&trades, initial_expected_dollar);
+    println!("Generated {} dollar imbalance bars.", imbalance_bars.len());
 
-    let output_path = "src/ch2/result/tick_imbalance_bars.png";
+    let output_path = "src/ch2/result/dollar_imbalance_bars.png";
     println!("Drawing chart to {}...", output_path);
     
     draw_overlay_chart(&time_bars, &imbalance_bars, output_path)?;
@@ -152,7 +160,7 @@ fn draw_overlay_chart(
     let max_price = time_bars.iter().map(|b| b.high).fold(f64::NEG_INFINITY, f64::max);
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Tick Imbalance Bars (Red Dots) vs 15m Time Bars (Candle)", ("sans-serif", 30).into_font())
+        .caption("Dollar Imbalance Bars (Blue Dots) vs 15m Time Bars (Candle)", ("sans-serif", 30).into_font())
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(40)
@@ -176,7 +184,7 @@ fn draw_overlay_chart(
         })
     )?;
 
-    // 2. Draw Tick Imbalance Bars as Points
+    // 2. Draw Imbalance Bars as Points
     chart.draw_series(
         imbalance_bars.iter().map(|b| {
             Circle::new(
@@ -186,7 +194,7 @@ fn draw_overlay_chart(
             )
         })
     )?
-    .label("Tick Imbalance Bar")
+    .label("Dollar Imbalance Bar")
     .legend(|(x, y)| Circle::new((x + 10, y), 4, BLUE.filled()));
 
     chart.configure_series_labels()

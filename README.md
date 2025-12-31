@@ -19,6 +19,9 @@ cargo run -- <command>
 | `volume` | Generate and plot Volume Bars. |
 | `dollar` | Generate and plot Dollar Bars. |
 | `imbalance` | Generate and plot Tick Imbalance Bars (overlaid on Time Bars). |
+| `volume_imbalance` | Generate and plot Volume Imbalance Bars. |
+| `dollar_imbalance` | Generate and plot Dollar Imbalance Bars. |
+| `cusum` | Apply and plot CUSUM Filter events. |
 | `compare` | Compare statistical distributions of different bar types. |
 | `all` | Run all of the above examples sequentially. |
 
